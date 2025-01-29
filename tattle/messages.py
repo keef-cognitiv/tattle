@@ -6,8 +6,8 @@ import sys
 
 import msgpack
 
-from tattle import crypto
-from tattle import logging
+from . import crypto
+from . import logging
 
 __all__ = [
     'MESSAGE_HEADER_LENGTH',
@@ -162,7 +162,7 @@ class MessageSerializer(object):
                 attr = data.pop(0)
                 if isinstance(attr, str) or isinstance(attr, bytes):
                     message_args.append(attr)
-                elif isinstance(attr, collections.Sequence):
+                elif isinstance(attr, collections.abc.Sequence):
                     message_args.append([cls._deserialize_internal(i) for i in attr])
                 else:
                     message_args.append(attr)
@@ -174,7 +174,7 @@ class MessageSerializer(object):
 
     @classmethod
     def _deserialize_message(cls, raw):
-        return cls._deserialize_internal(msgpack.unpackb(raw, encoding='utf-8', use_list=True))
+        return cls._deserialize_internal(msgpack.unpackb(raw, use_list=True))
 
     @classmethod
     def _decrypt_message(cls, raw, keys):
@@ -216,6 +216,9 @@ class MessageSerializer(object):
 
     @classmethod
     def _serialize_internal(cls, msg):
+        if isinstance(msg, str) or isinstance(msg, bytes):
+            return msg
+
         # insert the name of the class
         data = [msg.__class__.__name__]
 
@@ -229,9 +232,9 @@ class MessageSerializer(object):
             else:
                 if isinstance(attr, str) or isinstance(attr, bytes):
                     data.append(attr)
-                elif isinstance(attr, collections.Sequence):
+                elif isinstance(attr, collections.abc.Sequence):
                     data.append([cls._serialize_internal(i) for i in attr])
-                elif isinstance(attr, collections.Mapping):
+                elif isinstance(attr, collections.abc.Mapping):
                     data.append({k: cls._serialize_internal(v) for k, v in attr.items()})
                 else:
                     data.append(attr)
@@ -239,7 +242,7 @@ class MessageSerializer(object):
 
     @classmethod
     def _serialize_message(cls, msg):
-        return msgpack.packb(cls._serialize_internal(msg), use_bin_type=True, encoding='utf-8')
+        return msgpack.packb(cls._serialize_internal(msg), use_bin_type=True)
 
     @classmethod
     def _encrypt_message(cls, raw, key):
@@ -396,11 +399,12 @@ class AliveMessage(Message):
     _fields_ = [
         "node",  # node name
         ("addr", InternetAddress),
-        "incarnation"
+        "incarnation",
+        "metadata"
     ]
 
-    def __init__(self, node, addr, incarnation):
-        super(AliveMessage, self).__init__(node, addr, incarnation)
+    def __init__(self, node, addr, incarnation, metadata):
+        super(AliveMessage, self).__init__(node, addr, incarnation, metadata)
 
     def __str__(self):
         return "<%s %s>" % (self.__class__.__name__, self.node)
@@ -431,7 +435,7 @@ class SyncMessage(Message):
 
 class UserMessage(Message):
     _fields_ = [
-        "data"
+        "data",
         "sender"
     ]
 

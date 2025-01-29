@@ -4,7 +4,7 @@ import socket
 
 import netifaces
 
-from tattle import logging
+from . import logging
 
 __all__ = [
     'TCPListener',
@@ -71,8 +71,7 @@ class TCPListener(AbstractListener):
     async def start(self):
         self._server = await asyncio.start_server(self._handle_connection,
                                                   self._listen_address,
-                                                  self._listen_port,
-                                                  loop=self._loop)
+                                                  self._listen_port)
 
     async def stop(self):
         self._server.close()

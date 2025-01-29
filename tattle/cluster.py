@@ -5,16 +5,16 @@ import math
 import struct
 import time
 
-from tattle import config
-from tattle import event
-from tattle import logging
-from tattle import messages
-from tattle import network
-from tattle import schedule
-from tattle import state
-from tattle import sequence
-from tattle import queue
-from tattle import utilities
+from . import config
+from . import event
+from . import logging
+from . import messages
+from . import network
+from . import schedule
+from . import state
+from . import sequence
+from . import queue
+from . import utilities
 
 __all__ = [
     'Cluster'
@@ -36,6 +36,10 @@ class Cluster(object):
         Create a new instance of the Cluster class
         """
         self.config = config
+
+        self._metadata = {}
+
+        self._user_message_callback = None
 
         self._loop = loop or asyncio.get_event_loop()
 
@@ -103,13 +107,20 @@ class Cluster(object):
         # setup local node
         await self._nodes.set_local_node(self.local_node_name,
                                          self.local_node_address,
-                                         self.local_node_port)
+                                         self.local_node_port,
+                                         self.local_metadata)
 
         # schedule callbacks
         await self._probe_schedule.start()
         await self._sync_schedule.start()
 
         LOG.info("Node started")
+
+    @property
+    def local_metadata(self):
+        if self._nodes.local_node is not None:
+            return self._nodes.local_node.metadata
+        return self._metadata
 
     async def stop(self):
         """
@@ -137,10 +148,10 @@ class Cluster(object):
         # sync nodes
         tasks = []
         for node_host, node_port in node_address:
-            tasks.append(self._sync_node(node_host, node_port))
+            tasks.append(asyncio.ensure_future(self._sync_host(node_host, node_port)))
 
         # wait for syncs to complete
-        results = await asyncio.gather(*tasks, loop=self._loop, return_exceptions=True)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
         successful_nodes, failed_nodes = utilities.partition(lambda r: r is True, results)
         LOG.debug("Successfully synced %d nodes (%d failed)", len(successful_nodes), len(failed_nodes))
 
@@ -160,7 +171,7 @@ class Cluster(object):
         :return:
         """
         target_node = self._nodes.get(node)
-        await self._sync_node(target_node.host, target_node.port)
+        await self._sync_node(target_node)
 
     async def ping(self, node, indirect=False):
         """
@@ -175,6 +186,28 @@ class Cluster(object):
             await self._probe_node_indirect(target_node, self.config.probe_indirect_nodes)
         else:
             await self._probe_node(target_node)
+
+    async def send(self, node: state.Node | str, data, reliable=False):
+        """
+        Send a user message to a node
+
+        :param node: node name
+        :param data: message data
+        :param reliable: reliable delivery
+        """
+        target_node = self._nodes.get(node) if not isinstance(node, state.Node) else self._nodes.get(node.name)
+        reliable = reliable or len(data) > 65000
+
+        if reliable:
+            await self._ensure_connected(target_node)
+            await self._send_tcp_message(messages.UserMessage(data=data, sender=self.local_node_name),
+                                         target_node.write_stream)
+        else:
+            await self._send_udp_message(target_node.host, target_node.port,
+                                         messages.UserMessage(data=data, sender=self.local_node_name))
+
+    def on_user_message(self, callback):
+        self._user_message_callback = callback
 
     @property
     def members(self):
@@ -257,7 +290,7 @@ class Cluster(object):
         LOG.debug("Syncing node: %s", sync_node)
 
         try:
-            await self._sync_node(sync_node.host, sync_node.port)
+            await self._sync_node(sync_node)
         except Exception:
             LOG.exception("Error running sync")
 
@@ -376,7 +409,7 @@ class Cluster(object):
         try:
             # wait for timeout
             LOG.trace("Waiting for probe (seq=%d)", seq)
-            result = await asyncio.wait_for(future, timeout=self.config.probe_timeout, loop=self._loop)
+            result = await asyncio.wait_for(future, timeout=self.config.probe_timeout)
         except asyncio.TimeoutError:
             end_time = time.time()
             LOG.trace("Timeout waiting for probe (seq=%d) elapsed time: %0.2f", seq, end_time - start_time)
@@ -440,20 +473,24 @@ class Cluster(object):
         LOG.trace("Merging remote state: %s", remote_state)
 
         # merge Node into state
+
         if remote_state.status == state.NODE_STATUS_ALIVE:
             await self._nodes.on_node_alive(remote_state.node,
                                             remote_state.incarnation,
                                             remote_state.addr.address,
-                                            remote_state.addr.port)
+                                            remote_state.addr.port,
+                                            remote_state.metadata)
 
         elif remote_state.status == state.NODE_STATUS_SUSPECT:
             await self._nodes.on_node_suspect(remote_state.node,
-                                              remote_state.incarnation)
+                                              remote_state.incarnation,
+                                              remote_state.metadata)
 
         elif remote_state.status == state.NODE_STATUS_DEAD:
             # rather then declaring a node a dead immediately, mark it as suspect
             await self._nodes.on_node_suspect(remote_state.node,
-                                              remote_state.incarnation)
+                                              remote_state.incarnation,
+                                              remote_state.metadata)
 
         else:
             LOG.warn("Unknown node status: %s", remote_state.status)
@@ -476,7 +513,48 @@ class Cluster(object):
         # send message
         await self._send_tcp_message(messages.SyncMessage(remote_state=local_state), stream_writer)
 
-    async def _sync_node(self, node_host, node_port):
+    async def _after_connect_loop(self, node):
+        try:
+            # read until closed
+            while node.connected:
+                try:
+                    raw = await self._read_tcp_message(node.read_stream)
+                except IOError:
+                    LOG.exception("Error reading stream")
+                    break
+
+                if raw is None:
+                    break
+
+                # decode the message
+                message = self._decode_message(raw)
+                if message is None:
+                    continue
+
+                # dispatch the message
+                await self._handle_tcp_client_message(message, node.read_stream, node.write_stream,
+                                                      (node.host, node.port))
+
+        except Exception:
+            LOG.exception("Error handling TCP stream")
+            return
+
+    async def _ensure_connected(self, node):
+        if not node.connected:
+            await node.connect()
+            node._loop = asyncio.ensure_future(self._after_connect_loop(node))
+
+    async def _sync_node(self, node):
+        await self._ensure_connected(node)
+
+        # send local state
+        try:
+            await self._send_local_state(node.write_stream)
+        except IOError:
+            LOG.exception("Error sending remote state")
+            return
+
+    async def _sync_host(self, node_host, node_port):
         """
         Sync with remote node
         """
@@ -486,7 +564,7 @@ class Cluster(object):
             # connect to node
             LOG.debug("Connecting to node %s:%d", node_host, node_port)
             try:
-                stream_reader, stream_writer = await asyncio.open_connection(node_host, node_port, loop=self._loop)
+                stream_reader, stream_writer = await asyncio.open_connection(node_host, node_port)
             except Exception:
                 LOG.exception("Error connecting to node %s:%d", node_host, node_port)
                 return
@@ -599,6 +677,27 @@ class Cluster(object):
             if isinstance(message, messages.SyncMessage):
                 # noinspection PyTypeChecker
                 await self._handle_sync_message(message, stream_reader, stream_writer, client_addr)
+            elif isinstance(message, messages.UserMessage):
+                await self._handle_user_message(message, client_addr)
+            else:
+                LOG.warn("Unknown message type: %r", message.__class__)
+                return
+        except Exception:
+            LOG.exception("Error dispatching TCP message")
+            return
+
+    async def _handle_tcp_client_message(self, message, stream_reader, _, client_addr):
+        LOG.trace("Handling TCP message from %s", client_addr)
+        try:
+            if isinstance(message, messages.SyncMessage):
+                # noinspection PyTypeChecker
+
+                # merge remote state
+                for remote_state in message.nodes:
+                    await self._merge_remote_state(remote_state)
+
+            elif isinstance(message, messages.UserMessage):
+                await self._handle_user_message(message, client_addr)
             else:
                 LOG.warn("Unknown message type: %r", message.__class__)
                 return
@@ -695,13 +794,13 @@ class Cluster(object):
     async def _handle_alive_message(self, msg, client_addr):
         LOG.trace("Handling ALIVE message: node=%s", msg.node)
 
-        await self._nodes.on_node_alive(msg.node, msg.incarnation, msg.addr.address, msg.addr.port)
+        await self._nodes.on_node_alive(msg.node, msg.incarnation, msg.addr.address, msg.addr.port, msg.metadata)
 
     # noinspection PyUnusedLocal
     async def _handle_suspect_message(self, msg, client_addr):
         LOG.trace("Handling SUSPECT message: node=%s", msg.node)
 
-        await self._nodes.on_node_suspect(msg.node, msg.incarnation)
+        await self._nodes.on_node_suspect(msg.node, msg.incarnation, {})
 
     # noinspection PyUnusedLocal
     async def _handle_dead_message(self, msg, client_addr):
@@ -792,6 +891,11 @@ class Cluster(object):
     # noinspection PyUnusedLocal
     async def _handle_user_message(self, msg, client):
         LOG.trace("Handling USER message (%d bytes) sender=%s", len(msg.data), msg.sender)
+        if self._user_message_callback is not None:
+            try:
+                await self._user_message_callback(msg, client)
+            except Exception as e:
+                LOG.error("Error handling user message", exc_info=e)
 
     async def _send_udp_message(self, host, port, msg):
         LOG.trace("Sending %s to %s:%d", msg, host, port)

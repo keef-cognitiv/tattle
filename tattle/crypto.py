@@ -7,7 +7,7 @@ from cryptography.hazmat.primitives import ciphers
 from cryptography.hazmat.primitives.ciphers import algorithms
 from cryptography.hazmat.primitives.ciphers import modes
 
-from tattle import logging
+from . import logging
 
 __all__ = [
     'DecryptError',

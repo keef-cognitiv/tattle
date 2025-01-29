@@ -4,10 +4,10 @@ import math
 import random
 import time
 
-from tattle import logging
-from tattle import messages
-from tattle import timer
-from tattle import sequence
+from . import logging
+from . import messages
+from . import timer
+from . import sequence
 
 __all__ = [
     'NodeManager',
@@ -96,6 +96,9 @@ class Node(object):
         self.metadata = dict()
         self._status = status
         self._status_change_timestamp = None
+        self.read_stream = None
+        self.write_stream = None
+        self._loop = None
 
     def _get_status(self):
         return self._status
@@ -110,11 +113,38 @@ class Node(object):
     def __repr__(self):
         return "<Node %s status:%s>" % (self.name, self.status)
 
+    async def connect(self):
+        if (self.read_stream is not None and self.read_stream.exception() is not None) or \
+                (self.write_stream is not None and self.write_stream.exception() is not None):
+            await self.close()
+
+        if self.read_stream is None or self.write_stream is None:
+            self.read_stream, self.write_stream = await asyncio.open_connection(self.host, self.port)
+
+    @property
+    def connected(self):
+        return self.read_stream is not None and self.read_stream.exception() is None and \
+            self.write_stream is not None and not self.write_stream.is_closing()
+
+    async def close(self):
+        if self._loop:
+            self._loop.cancel()
+
+        if self.read_stream is not None:
+            self.read_stream.close()
+            await self.read_stream.wait_closed()
+            self.read_stream = None
+
+        if self.write_stream is not None:
+            self.write_stream.close()
+            await self.write_stream.wait_closed()
+            self.write_stream = None
+
 
 SuspectNode = collections.namedtuple('SuspectNode', ['timer', 'k', 'min_timeout', 'max_timeout', 'confirmations'])
 
 
-class NodeManager(collections.Sequence, collections.Mapping):
+class NodeManager(collections.abc.Sequence, collections.abc.Mapping):
     """
     The NodeManager manages the membership state of the Cluster.
     """
@@ -162,9 +192,9 @@ class NodeManager(collections.Sequence, collections.Mapping):
 
     @property
     def local_node(self):
-        return self._nodes_map[self._local_node_name]
+        return self._nodes_map.get(self._local_node_name)
 
-    async def set_local_node(self, local_node_name, local_node_host, local_node_port):
+    async def set_local_node(self, local_node_name, local_node_host, local_node_port, metadata):
         # assert self._local_node_name is None
         self._local_node_name = local_node_name
 
@@ -172,7 +202,7 @@ class NodeManager(collections.Sequence, collections.Mapping):
         incarnation = self._local_node_seq.increment()
 
         # signal node is alive
-        await self.on_node_alive(local_node_name, incarnation, local_node_host, local_node_port, bootstrap=True)
+        await self.on_node_alive(local_node_name, incarnation, local_node_host, local_node_port, metadata, bootstrap=True)
 
     async def leave_local_node(self):
         assert self._local_node_name is not None
@@ -181,13 +211,13 @@ class NodeManager(collections.Sequence, collections.Mapping):
         # signal node is dead
         await self.on_node_dead(self.local_node.name, self.local_node.incarnation)
 
-    async def on_node_alive(self, name, incarnation, host, port, bootstrap=False):
+    async def on_node_alive(self, name, incarnation, host, port, metadata, bootstrap=False):
         """
         Handle a Node alive notification
         """
 
         # acquire node lock
-        with (await self._nodes_lock):
+        async with self._nodes_lock:
 
             # # It is possible that during a leave, there is already an alive message in in the queue.
             # # If that happens ignore it so we don't rejoin the cluster.
@@ -243,6 +273,8 @@ class NodeManager(collections.Sequence, collections.Mapping):
             # update the current node status and incarnation number
             current_node.incarnation = incarnation
             current_node.status = NODE_STATUS_ALIVE
+
+            current_node.metadata = current_node.metadata | metadata
 
             # broadcast alive message
             self._broadcast_alive(current_node)
@@ -303,7 +335,7 @@ class NodeManager(collections.Sequence, collections.Mapping):
 
                 LOG.error("Node dead: %s (incarnation %d)", name, incarnation)
 
-    async def on_node_suspect(self, name, incarnation):
+    async def on_node_suspect(self, name, incarnation, metadata):
         """
         Handle a Node suspect notification
         """
@@ -348,6 +380,8 @@ class NodeManager(collections.Sequence, collections.Mapping):
             # create suspect node
             await self._create_suspect_node(current_node)
 
+            current_node.metadata = current_node.metadata | metadata
+
             # broadcast suspect message
             self._broadcast_suspect(current_node)
 
@@ -357,6 +391,7 @@ class NodeManager(collections.Sequence, collections.Mapping):
 
             if old_status != NODE_STATUS_SUSPECT:
                 LOG.warn("Node suspect: %s (incarnation %d)", name, incarnation)
+
 
     async def _confirm_suspect_node(self, node):
         pass
@@ -415,7 +450,8 @@ class NodeManager(collections.Sequence, collections.Mapping):
         LOG.debug("Broadcasting ALIVE message for node: %s (incarnation=%d)", node.name, node.incarnation)
         alive = messages.AliveMessage(node=node.name,
                                       addr=messages.InternetAddress(node.host, node.port),
-                                      incarnation=node.incarnation)
+                                      incarnation=node.incarnation,
+                                      metadata=node.metadata)
         self._send_broadcast(node, alive)
 
     def _broadcast_suspect(self, node):

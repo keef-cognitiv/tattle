@@ -1,7 +1,7 @@
 import asyncio
 import time
 
-from tattle import logging
+from . import logging
 
 __all__ = [
     'EventManger'

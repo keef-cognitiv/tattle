@@ -1,7 +1,7 @@
 import asyncio
 import contextlib
 
-from tattle import logging
+from . import logging
 
 __all__ = [
     'ScheduledCallback',
@@ -32,7 +32,7 @@ class ScheduledCallback(object):
 
     async def _run(self):
         while True:
-            await asyncio.sleep(self.interval, loop=self._loop)
+            await asyncio.sleep(self.interval)
             LOG.trace("Running scheduled callback: %s", self.func)
             res = self.func()
             if asyncio.coroutines.iscoroutine(res):

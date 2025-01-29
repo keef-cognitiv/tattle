@@ -4,8 +4,8 @@ import traceback
 
 from aiohttp import web
 
-from tattle import logging
-from tattle import json
+from . import logging
+from . import json
 
 __all__ = [
     'APIServer',
