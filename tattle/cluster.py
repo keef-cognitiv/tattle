@@ -196,7 +196,7 @@ class Cluster(object):
         :param reliable: reliable delivery
         """
         target_node = self._nodes.get(node) if not isinstance(node, state.Node) else self._nodes.get(node.name)
-        reliable = reliable or len(data) > 65000
+        reliable = reliable or len(data) > 1000
 
         if reliable:
             await self._ensure_connected(target_node)
@@ -393,7 +393,7 @@ class Cluster(object):
         LOG.debug("Probe failed for node: %s", node.name)
 
         # notify node is suspect
-        await self._nodes.on_node_suspect(node.name, node.incarnation)
+        await self._nodes.on_node_suspect(node.name, node.incarnation, node.metadata)
 
     async def _wait_for_probe(self, seq: int) -> bool:
 
