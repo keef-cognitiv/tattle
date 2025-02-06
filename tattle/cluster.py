@@ -893,7 +893,7 @@ class Cluster(object):
         LOG.trace("Handling USER message (%d bytes) sender=%s", len(msg.data), msg.sender)
         if self._user_message_callback is not None:
             try:
-                await self._user_message_callback(msg, client)
+                await self._user_message_callback(msg, msg.sender)
             except Exception as e:
                 LOG.error("Error handling user message", exc_info=e)
 
