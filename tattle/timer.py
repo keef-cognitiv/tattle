@@ -26,11 +26,15 @@ class Timer(object):
         self.start()
 
     def stop(self):
-        assert self._handle is not None
-        self._handle.cancel()
+        if self._handle is not None:
+            self._handle.cancel()
+        self._handle = None
 
     def _run(self):
         LOG.trace("Running timer callback: %s", self.func)
         res = self.func()
         if asyncio.coroutines.iscoroutine(res):
             self._loop.create_task(res)
+
+    def __del__(self):
+        self.stop()
