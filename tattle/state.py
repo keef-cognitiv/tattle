@@ -131,13 +131,10 @@ class Node(object):
             self._loop.cancel()
 
         if self.read_stream is not None:
-            self.read_stream.close()
-            await self.read_stream.wait_closed()
             self.read_stream = None
 
         if self.write_stream is not None:
             self.write_stream.close()
-            await self.write_stream.wait_closed()
             self.write_stream = None
 
 
@@ -291,7 +288,7 @@ class NodeManager(collections.abc.Sequence, collections.abc.Mapping):
         """
 
         # acquire node lock
-        with (await self._nodes_lock):
+        async with self._nodes_lock:
 
             # bail if this is a new node
             current_node = self._nodes_map.get(name)
@@ -341,7 +338,7 @@ class NodeManager(collections.abc.Sequence, collections.abc.Mapping):
         """
 
         # acquire node lock
-        async with await self._nodes_lock:
+        async with self._nodes_lock:
 
             # bail if this is a new node
             current_node = self._nodes_map.get(name)

@@ -382,7 +382,7 @@ class Cluster(object):
             if node.status == state.NODE_STATUS_SUSPECT:
                 LOG.warn("Suspect node is alive: %s", node.name)
 
-                await self._nodes.on_node_alive(node.name, node.incarnation, node.host, node.port)
+                await self._nodes.on_node_alive(node.name, node.incarnation, node.host, node.port, node.metadata)
 
         else:
             # TODO: handle NACK
@@ -435,7 +435,7 @@ class Cluster(object):
 
         try:
             # TODO: check results
-            await asyncio.gather(*probes, loop=self._loop)
+            await asyncio.gather(*probes)
         except:
             LOG.exception("Error probing nodes")
 
@@ -908,7 +908,7 @@ class Cluster(object):
         max_transmits = _calculate_transmit_limit(len(self._nodes), self.config.retransmit_multi)
         max_bytes = 512 - len(buf)
 
-        # gather gossip messages (already encoded)
+        # g)ather gossip messages (already encoded)
         gossip = self._queue.fetch(max_transmits, max_bytes)
         if gossip:
             LOG.trace("Gossip message max-transmits: %d", max_transmits)

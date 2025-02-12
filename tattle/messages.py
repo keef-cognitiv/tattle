@@ -138,9 +138,13 @@ class MessageSerializer(object):
     @classmethod
     def _deserialize_internal(cls, data):
         # get message type
+        if isinstance(data, str) or isinstance(data, bytes):
+            return data
+
         message_type_name = data.pop(0)
         if message_type_name is None:
             return None
+
         message_type = getattr(sys.modules[__name__], message_type_name)
 
         message_args = []
