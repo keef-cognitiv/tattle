@@ -153,6 +153,10 @@ class Cluster(object):
         # wait for syncs to complete
         results = await asyncio.gather(*tasks, return_exceptions=True)
         successful_nodes, failed_nodes = utilities.partition(lambda r: r is True, results)
+
+        if failed_nodes and not successful_nodes:
+            raise RuntimeError("Failed to join any nodes")
+
         LOG.debug("Successfully synced %d nodes (%d failed)", len(successful_nodes), len(failed_nodes))
 
     async def leave(self):
