@@ -755,7 +755,7 @@ class Cluster(object):
         buf += reader.read(length - messages.MESSAGE_HEADER_LENGTH)
         return buf
 
-    async def _handle_udp_data(self, data, client_addr):
+    def _handle_udp_data(self, data, client_addr):
         try:
 
             # create a buffered reader
@@ -779,7 +779,7 @@ class Cluster(object):
                     continue
 
                 # dispatch the message
-                await self._handle_udp_message(msg, client_addr)
+                asyncio.create_task(self._handle_udp_message(msg, client_addr))
 
         except Exception:
             LOG.exception("Error handling UDP data")
