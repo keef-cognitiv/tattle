@@ -115,7 +115,7 @@ class Node(object):
 
     async def connect(self):
         if (self.read_stream is not None and self.read_stream.exception() is not None) or \
-                (self.write_stream is not None and self.write_stream.exception() is not None):
+                (self.write_stream is not None and not self.write_stream.is_closing() is not None):
             await self.close()
 
         if self.read_stream is None or self.write_stream is None:
@@ -293,7 +293,7 @@ class NodeManager(collections.abc.Sequence, collections.abc.Mapping):
             # bail if this is a new node
             current_node = self._nodes_map.get(name)
             if current_node is None:
-                LOG.warn("Ignoring unknown node: %s", name)
+                LOG.trace("Ignoring unknown node: %s", name)
                 return
 
             # return if node is dead
@@ -428,6 +428,17 @@ class NodeManager(collections.abc.Sequence, collections.abc.Mapping):
         timer_.start()
 
         LOG.debug("Created suspect node: %s", node.name)
+
+    async def forget_node(self, name):
+        async with self._nodes_lock:
+            current_node = self._nodes_map.get(name)
+            if current_node is not None:
+                # only allowed to forget dead nodes
+                assert current_node.status == NODE_STATUS_DEAD
+
+                self._nodes.remove(current_node)
+                del self._nodes_map[name]
+                self._swap_random_nodes()
 
     async def _cancel_suspect_node(self, node):
         # stop suspect Timer

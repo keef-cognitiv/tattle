@@ -138,7 +138,7 @@ class MessageSerializer(object):
     @classmethod
     def _deserialize_internal(cls, data):
         # get message type
-        if isinstance(data, str) or isinstance(data, bytes):
+        if isinstance(data, str) or isinstance(data, bytes) or isinstance(data, int):
             return data
 
         message_type_name = data.pop(0)
@@ -164,7 +164,7 @@ class MessageSerializer(object):
 
             else:
                 attr = data.pop(0)
-                if isinstance(attr, str) or isinstance(attr, bytes):
+                if isinstance(attr, str) or isinstance(attr, bytes) or isinstance(attr, int):
                     message_args.append(attr)
                 elif isinstance(attr, collections.abc.Sequence):
                     message_args.append([cls._deserialize_internal(i) for i in attr])
@@ -220,7 +220,7 @@ class MessageSerializer(object):
 
     @classmethod
     def _serialize_internal(cls, msg):
-        if isinstance(msg, str) or isinstance(msg, bytes):
+        if isinstance(msg, str) or isinstance(msg, bytes) or isinstance(msg, int):
             return msg
 
         # insert the name of the class
@@ -234,7 +234,7 @@ class MessageSerializer(object):
                 # if attr has a field type defined deserialize that field
                 data.extend(cls._serialize_internal(attr))
             else:
-                if isinstance(attr, str) or isinstance(attr, bytes):
+                if isinstance(attr, str) or isinstance(attr, bytes) or isinstance(attr, int):
                     data.append(attr)
                 elif isinstance(attr, collections.abc.Sequence):
                     data.append([cls._serialize_internal(i) for i in attr])

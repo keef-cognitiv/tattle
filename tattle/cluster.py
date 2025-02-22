@@ -88,6 +88,9 @@ class Cluster(object):
     def _init_sync(self):
         self._sync_schedule = schedule.ScheduledCallback(self._do_sync, self.config.sync_interval, loop=self._loop)
 
+    async def forget(self, name):
+        await self._nodes.forget_node(name)
+
     async def start(self):
         """
         Start the cluster on this node.
@@ -130,6 +133,8 @@ class Cluster(object):
         """
         await self._probe_schedule.stop()
         await self._sync_schedule.stop()
+        for node in self.members:
+            await node.close();
         await self._tcp_listener.stop()
         await self._udp_listener.stop()
 
@@ -152,12 +157,25 @@ class Cluster(object):
 
         # wait for syncs to complete
         results = await asyncio.gather(*tasks, return_exceptions=True)
+        known_hosts = set(node_address)
+
         successful_nodes, failed_nodes = utilities.partition(lambda r: r is True, results)
 
         if failed_nodes and not successful_nodes:
             raise RuntimeError("Failed to join any nodes")
 
         LOG.debug("Successfully synced %d nodes (%d failed)", len(successful_nodes), len(failed_nodes))
+        tasks  = []
+        for node in self.members:
+            if node.name == self.local_node_name:
+                continue
+
+            if (node.host, node.port) not in known_hosts:
+                continue
+
+            tasks.append(asyncio.ensure_future(self._sync_host(node.host, node.port)))
+
+        await asyncio.gather(*tasks, return_exceptions=True)
 
     async def leave(self):
         """
