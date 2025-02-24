@@ -436,8 +436,12 @@ class NodeManager(collections.abc.Sequence, collections.abc.Mapping):
                 # only allowed to forget dead nodes
                 assert current_node.status == NODE_STATUS_DEAD
 
+                LOG.info(f"Forgetting node {name}")
+
                 self._nodes.remove(current_node)
                 del self._nodes_map[name]
+                if name in self._suspect_nodes:
+                    del self._suspect_nodes[name]
                 self._swap_random_nodes()
 
     async def _cancel_suspect_node(self, node):

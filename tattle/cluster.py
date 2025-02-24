@@ -663,8 +663,13 @@ class Cluster(object):
                 # dispatch the message
                 await self._handle_tcp_message(message, stream_reader, stream_writer, client_addr)
 
-        except Exception:
+        except Exception as e:
             LOG.exception("Error handling TCP stream")
+            try:
+                stream_reader.set_exception(e)
+                stream_writer.close()
+            except Exception:
+                pass
             return
 
     async def _read_tcp_message(self, stream_reader: asyncio.streams.StreamReader):
