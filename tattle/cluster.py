@@ -15,6 +15,7 @@ from . import state
 from . import sequence
 from . import queue
 from . import utilities
+from typing import Union
 
 __all__ = [
     'Cluster'
@@ -209,7 +210,7 @@ class Cluster(object):
         else:
             await self._probe_node(target_node)
 
-    async def send(self, node: state.Node | str, data, reliable=False):
+    async def send(self, node: Union[state.Node, str], data, reliable=False):
         """
         Send a user message to a node
 
