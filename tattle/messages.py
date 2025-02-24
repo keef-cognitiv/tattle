@@ -34,8 +34,8 @@ __all__ = [
 
 LOG = logging.get_logger(__name__)
 
-MESSAGE_HEADER_LENGTH = 7  # 2 for length, 1 for flags, 4 for CRC32
-MESSAGE_HEADER_FORMAT = '!HBL'  # network byte order is B/E
+MESSAGE_HEADER_LENGTH = 9  # 4 for length, 1 for flags, 4 for CRC32
+MESSAGE_HEADER_FORMAT = '!IBL'  # network byte order is B/E
 
 MESSAGE_FLAG_ENCRYPT = 0x80
 
