@@ -568,10 +568,9 @@ class Cluster(object):
             node._loop = asyncio.ensure_future(self._after_connect_loop(node))
 
     async def _sync_node(self, node):
-        await self._ensure_connected(node)
-
         # send local state
         try:
+            await self._ensure_connected(node)
             await self._send_local_state(node.write_stream)
         except IOError:
             LOG.exception("Error sending remote state")
