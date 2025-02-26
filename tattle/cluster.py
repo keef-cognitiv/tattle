@@ -572,9 +572,10 @@ class Cluster(object):
         try:
             await self._ensure_connected(node)
             await self._send_local_state(node.write_stream)
-        except IOError:
-            LOG.exception("Error sending remote state")
-            return
+        except IOError as e:
+            if 'raft_participant' in node.metadata and not node.metadata['raft_participant'] == 'true':
+                return
+            LOG.exception("Error sending remote state", exc_info=e)
 
     async def _sync_host(self, node_host, node_port):
         """
