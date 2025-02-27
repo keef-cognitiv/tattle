@@ -243,9 +243,10 @@ class NodeManager(collections.abc.Sequence, collections.abc.Mapping):
 
             # return if conflicting node address
             if current_node.host != host or current_node.port != port:
-                LOG.error("Conflicting node address for %s (current=%s:%d new=%s:%d)",
+                LOG.warning("Conflicting node address for %s (current=%s:%d new=%s:%d)",
                           name, current_node.host, current_node.port, host, port)
-                return
+                current_node.host = host
+                current_node.port = port
 
             is_local_node = current_node is self.local_node
 
